@@ -1,26 +1,38 @@
 package mini.spring;
 
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
+import java.util.Arrays;
 
 public class BeanDefinition {
     private String name;
     private Constructor<?> constructor;
+    private Method postConstructMethod;
 
     public BeanDefinition(Class<?> type) {
         Component component = type.getAnnotation(Component.class);
-        name = component.name().isEmpty() ? type.getSimpleName() : component.name();
+        this.name = component.name().isEmpty() ? type.getSimpleName() : component.name();
         try {
-            constructor = type.getConstructor();
+            this.constructor = type.getConstructor();
+            this.postConstructMethod =
+                    Arrays.stream(type.getDeclaredMethods())
+                            .filter(method -> method.isAnnotationPresent(PostConstruct.class))
+                            .findFirst()
+                            .orElse(null);
         } catch (NoSuchMethodException e) {
             throw new RuntimeException(e);
         }
     }
 
     public String getName() {
-        return name;
+        return this.name;
     }
 
     public Constructor<?> getConstructor() {
-        return constructor;
+        return this.constructor;
+    }
+
+    public Method getPostConstructMethod() {
+        return this.postConstructMethod;
     }
 }

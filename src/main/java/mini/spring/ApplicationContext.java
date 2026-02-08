@@ -3,6 +3,7 @@ package mini.spring;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.net.URL;
 import java.nio.file.*;
 import java.nio.file.attribute.BasicFileAttributes;
@@ -76,9 +77,13 @@ public class ApplicationContext {
 
     protected void doCreateBean(BeanDefinition beanDefinition) {
         Constructor<?> constructor = beanDefinition.getConstructor();
+        Method postConstructMethod = beanDefinition.getPostConstructMethod();
         try {
             Object bean = constructor.newInstance();
             beanMap.put(beanDefinition.getName(), bean);
+            if (postConstructMethod != null) {
+                postConstructMethod.invoke(bean);
+            }
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
