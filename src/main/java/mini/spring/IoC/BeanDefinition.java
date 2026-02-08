@@ -1,11 +1,10 @@
-package mini.spring;
+package mini.spring.IoC;
 
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import java.util.Arrays;
 import java.util.List;
-import java.util.stream.Collectors;
 
 public class BeanDefinition {
     private String name;

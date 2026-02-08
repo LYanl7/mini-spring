@@ -1,12 +1,11 @@
-package mini.spring;
+package mini.spring.IoC;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-@Target(ElementType.TYPE)
+@Target(ElementType.FIELD)
 @Retention(RetentionPolicy.RUNTIME)
-public @interface Component {
-    String name() default "";
+public @interface Autowired {
 }

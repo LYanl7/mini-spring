@@ -1,8 +1,8 @@
 package mini.spring.sub;
 
-import mini.spring.Autowired;
-import mini.spring.Component;
-import mini.spring.PostConstruct;
+import mini.spring.IoC.Autowired;
+import mini.spring.IoC.Component;
+import mini.spring.IoC.PostConstruct;
 
 @Component
 public class Dog {

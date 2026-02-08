@@ -1,10 +1,9 @@
-package mini.spring;
+package mini.spring.IoC;
 
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.nio.file.*;
@@ -19,6 +18,7 @@ public class ApplicationContext {
     private Map<String, Object> beanMap = new HashMap<>();
     private Map<String, Object> loadingBeanMap = new HashMap<>();
     private Map<String, BeanDefinition> beanDefinitionMap = new HashMap<>();
+    private List<BeanPostProcessor> processors = new ArrayList<>();
 
     public ApplicationContext(String packageName) throws Exception {
         initApplicationContext(packageName);
@@ -28,7 +28,16 @@ public class ApplicationContext {
         this.scanPackage(packageName).stream()
                 .filter(this::scanCreate)
                 .forEach(this::wrapper);
+        initBeanPostProcessors();
         this.beanDefinitionMap.values().forEach(this::createBean);
+    }
+
+    private void initBeanPostProcessors() {
+        this.beanDefinitionMap.values().stream()
+                .filter(beanDefinition -> BeanPostProcessor.class.isAssignableFrom(beanDefinition.getBeanType()))
+                .map(this::createBean)
+                .map((bean) -> (BeanPostProcessor) bean)
+                .forEach(this.processors::add);
     }
 
     private List<Class<?>> scanPackage(String packageName) throws Exception {
@@ -83,22 +92,38 @@ public class ApplicationContext {
 
     protected Object doCreateBean(BeanDefinition beanDefinition) {
         Constructor<?> constructor = beanDefinition.getConstructor();
-        Method postConstructMethod = beanDefinition.getPostConstructMethod();
         String beanName = beanDefinition.getName();
         Object bean = null;
         try {
             bean = constructor.newInstance();
             this.loadingBeanMap.put(beanDefinition.getName(), bean);
             autowireBean(bean, beanDefinition);
-            if (postConstructMethod != null) {
-                postConstructMethod.invoke(bean);
-            }
-            this.beanMap.put(beanName, this.loadingBeanMap.remove(beanName));
+            bean = initBean(bean, beanDefinition);
+            this.loadingBeanMap.remove(beanName);
+            this.beanMap.put(beanName, bean);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
         return bean;
     }
+
+    private Object initBean(Object bean, BeanDefinition beanDefinition) throws Exception {
+        for (BeanPostProcessor processor : this.processors) {
+            bean = processor.beforeInitialization(bean, beanDefinition.getName());
+        }
+
+        Method postConstructMethod = beanDefinition.getPostConstructMethod();
+        if (postConstructMethod != null) {
+            postConstructMethod.invoke(bean);
+        }
+
+        for (BeanPostProcessor processor : this.processors) {
+            bean = processor.afterInitialization(bean, beanDefinition.getName());
+        }
+
+        return bean;
+    }
+
 
     private void autowireBean(Object bean, BeanDefinition beanDefinition) throws IllegalAccessException {
         for (Field field : beanDefinition.getAutowiredFields()) {
