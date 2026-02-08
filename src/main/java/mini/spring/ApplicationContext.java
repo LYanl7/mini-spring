@@ -3,6 +3,8 @@ package mini.spring;
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URL;
 import java.nio.file.*;
@@ -15,6 +17,7 @@ import java.util.Map;
 public class ApplicationContext {
 
     private Map<String, Object> beanMap = new HashMap<>();
+    private Map<String, Object> loadingBeanMap = new HashMap<>();
     private Map<String, BeanDefinition> beanDefinitionMap = new HashMap<>();
 
     public ApplicationContext(String packageName) throws Exception {
@@ -24,8 +27,8 @@ public class ApplicationContext {
     private void initApplicationContext(String packageName) throws Exception {
         this.scanPackage(packageName).stream()
                 .filter(this::scanCreate)
-                .map(this::wrapper)
-                .forEach(this::createBean);
+                .forEach(this::wrapper);
+        this.beanDefinitionMap.values().forEach(this::createBean);
     }
 
     private List<Class<?>> scanPackage(String packageName) throws Exception {
@@ -60,51 +63,80 @@ public class ApplicationContext {
 
     protected BeanDefinition wrapper(Class<?> type) {
         BeanDefinition beanDefinition = new BeanDefinition(type);
-        if (beanDefinitionMap.containsKey(beanDefinition.getName())) {
+        if (this.beanDefinitionMap.containsKey(beanDefinition.getName())) {
             throw new RuntimeException("重复的 Bean 名字");
         }
-        beanDefinitionMap.put(beanDefinition.getName(), beanDefinition);
+        this.beanDefinitionMap.put(beanDefinition.getName(), beanDefinition);
         return beanDefinition;
     }
 
-    protected void createBean(BeanDefinition beanDefinition) {
+    protected Object createBean(BeanDefinition beanDefinition) {
         String beanName = beanDefinition.getName();
-        if (beanMap.containsKey(beanName)) {
-            return;
+        if (this.beanMap.containsKey(beanName)) {
+            return this.beanMap.get(beanName);
         }
-        doCreateBean(beanDefinition);
+        if (this.loadingBeanMap.containsKey(beanName)) {
+            return this.loadingBeanMap.get(beanName);
+        }
+        return doCreateBean(beanDefinition);
     }
 
-    protected void doCreateBean(BeanDefinition beanDefinition) {
+    protected Object doCreateBean(BeanDefinition beanDefinition) {
         Constructor<?> constructor = beanDefinition.getConstructor();
         Method postConstructMethod = beanDefinition.getPostConstructMethod();
+        String beanName = beanDefinition.getName();
+        Object bean = null;
         try {
-            Object bean = constructor.newInstance();
-            beanMap.put(beanDefinition.getName(), bean);
+            bean = constructor.newInstance();
+            this.loadingBeanMap.put(beanDefinition.getName(), bean);
+            autowireBean(bean, beanDefinition);
             if (postConstructMethod != null) {
                 postConstructMethod.invoke(bean);
             }
+            this.beanMap.put(beanName, this.loadingBeanMap.remove(beanName));
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+        return bean;
+    }
+
+    private void autowireBean(Object bean, BeanDefinition beanDefinition) throws IllegalAccessException {
+        for (Field field : beanDefinition.getAutowiredFields()) {
+            field.setAccessible(true);
+            field.set(bean, this.getBean(field.getType()));
         }
     }
 
     public Object getBean(String name) {
-        return beanMap.get(name);
+        if (name == null) {
+            return null;
+        }
+        Object bean = beanMap.get(name);
+        if (bean != null) {
+            return bean;
+        }
+        BeanDefinition beanDefinition = beanDefinitionMap.get(name);
+        if (beanDefinition != null) {
+            return createBean(beanDefinition);
+        }
+        return null;
     }
 
     public <T> T getBean(Class<T> beanType) {
-        return this.beanMap.values().stream()
-                .filter(bean->beanType.isAssignableFrom(bean.getClass()))
-                .map(bean -> (T) bean)
-                .findAny()
-                .orElseGet(null);
+        String beanName = this.beanDefinitionMap.values().stream()
+                .filter(beanDefinition -> beanType.isAssignableFrom(beanDefinition.getBeanType()))
+                .map(BeanDefinition::getName)
+                .findFirst()
+                .orElse(null);
+        return (T) this.getBean(beanName);
     }
 
     public <T> List<T> getBeans(Class<T> beanType) {
-        return this.beanMap.values().stream()
-                .filter(bean->beanType.isAssignableFrom(bean.getClass()))
-                .map(bean -> (T) bean)
+        return this.beanDefinitionMap.values().stream()
+                .filter(beanDefinition->beanType.isAssignableFrom(beanDefinition.getBeanType()))
+                .map(BeanDefinition::getName)
+                .map(this::getBean)
+                .map(beanDefinition -> (T) beanDefinition)
                 .toList();
     }
 }
