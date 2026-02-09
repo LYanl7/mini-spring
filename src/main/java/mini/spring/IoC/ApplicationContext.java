@@ -128,7 +128,15 @@ public class ApplicationContext {
     private void autowireBean(Object bean, BeanDefinition beanDefinition) throws IllegalAccessException {
         for (Field field : beanDefinition.getAutowiredFields()) {
             field.setAccessible(true);
-            field.set(bean, this.getBean(field.getType()));
+            Object val = this.getBean(field.getType());
+            if (val != null) {
+                field.set(bean, val);
+            } else {
+                Autowired autowired = field.getAnnotation(Autowired.class);
+                if (autowired.required()) {
+                    throw new RuntimeException("找不到对应的 Bean");
+                }
+            }
         }
     }
 
