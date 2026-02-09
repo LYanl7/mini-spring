@@ -135,6 +135,8 @@ public class ApplicationContext {
                 Autowired autowired = field.getAnnotation(Autowired.class);
                 if (autowired.required()) {
                     throw new RuntimeException("找不到对应的 Bean");
+                } else {
+                    field.set(bean, null);
                 }
             }
         }
