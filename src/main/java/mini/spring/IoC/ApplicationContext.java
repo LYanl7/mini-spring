@@ -98,7 +98,7 @@ public class ApplicationContext {
             bean = constructor.newInstance();
             this.loadingBeanMap.put(beanDefinition.getName(), bean);
             autowireBean(bean, beanDefinition);
-            bean = initBean(bean, beanDefinition);
+            bean = initializeBean(bean, beanDefinition);
             this.loadingBeanMap.remove(beanName);
             this.beanMap.put(beanName, bean);
         } catch (Exception e) {
@@ -107,7 +107,7 @@ public class ApplicationContext {
         return bean;
     }
 
-    private Object initBean(Object bean, BeanDefinition beanDefinition) throws Exception {
+    private Object initializeBean(Object bean, BeanDefinition beanDefinition) throws Exception {
         for (BeanPostProcessor processor : this.processors) {
             bean = processor.beforeInitialization(bean, beanDefinition.getName());
         }
