@@ -230,7 +230,7 @@ public final class DynamicProxyFactory {
         }
     }
 
-    private static final class SubclassProxyInterceptor {
+    public static final class SubclassProxyInterceptor {
         private final MethodInterceptor interceptor;
 
         private SubclassProxyInterceptor(MethodInterceptor interceptor) {
@@ -292,4 +292,3 @@ public final class DynamicProxyFactory {
         }
     }
 }
-

@@ -39,15 +39,15 @@ public class AspectProcessor implements BeanPostProcessor {
                     PointcutExpression pointcutExpression;
                     if (method.isAnnotationPresent(Before.class)) {
                         Before before = method.getAnnotation(Before.class);
-                        pointcutExpression = AspectJPointcutExpressionParser.parse(before.value(), aspectType);
+                        pointcutExpression = AspectJPointcutExpressionParser.parse(before.value());
                         adviceType = "before";
                     } else if (method.isAnnotationPresent(After.class)) {
                         After after = method.getAnnotation(After.class);
-                        pointcutExpression = AspectJPointcutExpressionParser.parse(after.value(), aspectType);
+                        pointcutExpression = AspectJPointcutExpressionParser.parse(after.value());
                         adviceType = "after";
                     } else {
                         Around around = method.getAnnotation(Around.class);
-                        pointcutExpression = AspectJPointcutExpressionParser.parse(around.value(), aspectType);
+                        pointcutExpression = AspectJPointcutExpressionParser.parse(around.value());
                         adviceType = "around";
                     }
 

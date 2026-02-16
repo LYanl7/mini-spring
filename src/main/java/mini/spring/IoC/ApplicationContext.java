@@ -1,5 +1,7 @@
 package mini.spring.IoC;
 
+import mini.spring.AOP.AutoProxyCreator;
+
 import java.io.File;
 import java.io.IOException;
 import java.lang.reflect.Constructor;
@@ -17,6 +19,8 @@ public class ApplicationContext {
 
     private Map<String, Object> beanMap = new HashMap<>();
     private Map<String, Object> loadingBeanMap = new HashMap<>();
+    private Map<String, ObjectFactory<?>> singletonFactories = new HashMap<>();
+
     private Map<String, BeanDefinition> beanDefinitionMap = new HashMap<>();
     private List<BeanPostProcessor> processors = new ArrayList<>();
 
@@ -90,16 +94,29 @@ public class ApplicationContext {
         return doCreateBean(beanDefinition);
     }
 
+    protected Object getEarlyBean(Object bean, BeanDefinition beanDefinition) {
+        for (BeanPostProcessor processor : this.processors) {
+            if (processor instanceof  AutoProxyCreator) {
+                bean = processor.afterInitialization(bean, beanDefinition.getName());
+            }
+        }
+
+        return bean;
+    }
+
     protected Object doCreateBean(BeanDefinition beanDefinition) {
         Constructor<?> constructor = beanDefinition.getConstructor();
         String beanName = beanDefinition.getName();
-        Object bean = null;
+        Object bean;
         try {
             bean = constructor.newInstance();
-            this.loadingBeanMap.put(beanDefinition.getName(), bean);
+            Object finalBean = bean;
+            this.singletonFactories.put(beanName, () -> getEarlyBean(finalBean, beanDefinition));
+
             autowireBean(bean, beanDefinition);
             bean = initializeBean(bean, beanDefinition);
             this.loadingBeanMap.remove(beanName);
+            this.singletonFactories.remove(beanName);
             this.beanMap.put(beanName, bean);
         } catch (Exception e) {
             throw new RuntimeException(e);
@@ -123,7 +140,6 @@ public class ApplicationContext {
 
         return bean;
     }
-
 
     private void autowireBean(Object bean, BeanDefinition beanDefinition) throws IllegalAccessException {
         for (Field field : beanDefinition.getAutowiredFields()) {
@@ -150,6 +166,20 @@ public class ApplicationContext {
         if (bean != null) {
             return bean;
         }
+
+        Object loadingBean = loadingBeanMap.get(name);
+        if (loadingBean != null) {
+            return loadingBean;
+        }
+
+        ObjectFactory<?> objectFactory = singletonFactories.get(name);
+        if (objectFactory != null) {
+            bean = objectFactory.getObject();
+            this.loadingBeanMap.put(name, bean);
+            this.singletonFactories.remove(name);
+            return bean;
+        }
+
         BeanDefinition beanDefinition = beanDefinitionMap.get(name);
         if (beanDefinition != null) {
             return createBean(beanDefinition);

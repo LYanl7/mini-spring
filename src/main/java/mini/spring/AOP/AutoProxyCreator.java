@@ -23,24 +23,25 @@ public class AutoProxyCreator implements BeanPostProcessor {
         for (Method declaredMethod : bean.getClass().getDeclaredMethods()) {
             for (Advisor advisor : advisors) {
                 PointcutExpression pointcutExpression = advisor.getPointcutExpression();
-                boolean hit = AspectJPointcutExpressionParser.matchesMethodExecution(pointcutExpression, declaredMethod);
+                boolean hit = !bean.getClass().isAnnotationPresent(Aspect.class) &&
+                        AspectJPointcutExpressionParser.matchesMethodExecution(pointcutExpression, declaredMethod);
                 Method adviceMethod = advisor.getAdviceMethod();
 
                 if (!hit) {
                     continue;
                 }
 
-                Object finalBean = bean;
+                Object aspectBean = advisor.getAspectBean();
                 bean = DynamicProxyFactory.createProxy(bean, invocation -> {
                     adviceMethod.setAccessible(true);
                     try {
                         return switch (advisor.getAdviceType()) {
-                            case "before" -> { adviceMethod.invoke(finalBean); yield invocation.proceed(); }
-                            case "after"  -> { try { yield invocation.proceed(); } finally { adviceMethod.invoke(finalBean); } }
-                            case "around" -> adviceMethod.invoke(finalBean, invocation);
+                            case "before" -> { adviceMethod.invoke(aspectBean); yield invocation.proceed(); }
+                            case "after"  -> { try { yield invocation.proceed(); } finally { adviceMethod.invoke(aspectBean); } }
+                            case "around" -> adviceMethod.invoke(aspectBean, invocation);
                             default       -> invocation.proceed();
                         };
-                    } catch (java.lang.reflect.InvocationTargetException e) {
+                    } catch (InvocationTargetException e) {
                         throw e.getTargetException();
                     }
                 });
