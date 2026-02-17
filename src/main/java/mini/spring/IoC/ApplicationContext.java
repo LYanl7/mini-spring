@@ -30,7 +30,7 @@ public class ApplicationContext {
 
     private void initApplicationContext(String packageName) throws Exception {
         this.scanPackage(packageName).stream()
-                .filter(this::scanCreate)
+                .filter(this::canCreate)
                 .forEach(this::wrapper);
         initBeanPostProcessors();
         this.beanDefinitionMap.values().forEach(this::createBean);
@@ -70,7 +70,7 @@ public class ApplicationContext {
         return classes;
     }
 
-    protected boolean scanCreate(Class<?> type) {
+    protected boolean canCreate(Class<?> type) {
         return type.isAnnotationPresent(Component.class);
     }
 
