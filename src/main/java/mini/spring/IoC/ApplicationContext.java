@@ -15,6 +15,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static mini.spring.IoC.ReflectionUtil.getFieldGenericType;
+
 public class ApplicationContext {
 
     private Map<String, Object> beanMap = new HashMap<>();
@@ -144,6 +146,15 @@ public class ApplicationContext {
     private void autowireBean(Object bean, BeanDefinition beanDefinition) throws IllegalAccessException {
         for (Field field : beanDefinition.getAutowiredFields()) {
             field.setAccessible(true);
+            if (List.class.isAssignableFrom(field.getType())) {
+                Class<?> genericType = getFieldGenericType(field);
+                List<Object> beans = (List<Object>) this.getBeans(genericType);
+                if (beans !=null) {
+                    field.set(bean, beans);
+                }
+                continue;
+            }
+
             Object val = this.getBean(field.getType());
             if (val != null) {
                 field.set(bean, val);
@@ -155,6 +166,7 @@ public class ApplicationContext {
                     field.set(bean, null);
                 }
             }
+
         }
     }
 

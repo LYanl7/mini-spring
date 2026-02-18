@@ -6,6 +6,7 @@ import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import mini.spring.AOP.DynamicProxyFactory;
+import mini.spring.IoC.Autowired;
 import mini.spring.IoC.BeanPostProcessor;
 import mini.spring.IoC.Component;
 
@@ -13,13 +14,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.lang.reflect.Parameter;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
 @Component
 public class DispatcherServlet extends HttpServlet implements BeanPostProcessor {
 
+    @Autowired
+    private List<HandlerInterceptor> interceptors = new ArrayList<>();
     private Map<String, WebHandler> handlerMap = new HashMap<>();
 
     @Override
@@ -30,11 +31,24 @@ public class DispatcherServlet extends HttpServlet implements BeanPostProcessor 
             resp.getWriter().write("404 Not Found");
             return;
         }
+        Exception ex = null;
+
         try {
+            for (HandlerInterceptor interceptor : interceptors) {
+                if (!interceptor.preHandle(req, resp, handler)) {
+                    return;
+                }
+            }
+
             Object controllerBean = handler.getControllerBean();
             Method method = handler.getMethod();
             Object[] args = resolveArgs(req, method);
             Object result = method.invoke(controllerBean, args);
+
+            for (HandlerInterceptor interceptor : interceptors) {
+                interceptor.postHandle(req, resp, handler, result);
+            }
+
             switch (handler.getResultType()) {
                 case JSON -> {
                     resp.setContentType("application/json;charset=UTF-8");
@@ -55,9 +69,17 @@ public class DispatcherServlet extends HttpServlet implements BeanPostProcessor 
                     }
                 }
             }
-
         } catch (Exception e) {
+            ex = e;
             throw new ServletException(e);
+        } finally {
+            for (HandlerInterceptor interceptor : interceptors) {
+                try {
+                    interceptor.afterCompletion(req, resp, handler, ex);
+                } catch (Exception e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
     }
 
