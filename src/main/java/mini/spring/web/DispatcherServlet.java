@@ -10,7 +10,9 @@ import mini.spring.IoC.BeanPostProcessor;
 import mini.spring.IoC.Component;
 
 import java.io.IOException;
+import java.io.InputStream;
 import java.lang.reflect.Method;
+import java.lang.reflect.Parameter;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
@@ -31,7 +33,8 @@ public class DispatcherServlet extends HttpServlet implements BeanPostProcessor 
         try {
             Object controllerBean = handler.getControllerBean();
             Method method = handler.getMethod();
-            Object result = method.invoke(controllerBean);
+            Object[] args = resolveArgs(req, method);
+            Object result = method.invoke(controllerBean, args);
             switch (handler.getResultType()) {
                 case JSON -> {
                     resp.setContentType("application/json;charset=UTF-8");
@@ -42,13 +45,47 @@ public class DispatcherServlet extends HttpServlet implements BeanPostProcessor 
                     resp.getWriter().write(result.toString());
                 }
                 case LOCAL -> {
-
+                    ModelAndView modelAndView = (ModelAndView) result;
+                    String view = modelAndView.getView();
+                    InputStream inputStream = this.getClass().getClassLoader().getResourceAsStream(view);
+                    try(inputStream) {
+                        String html = new String(inputStream.readAllBytes());
+                        resp.setContentType("text/html;charset=UTF-8");
+                        resp.getWriter().write(html);
+                    }
                 }
             }
 
         } catch (Exception e) {
             throw new ServletException(e);
         }
+    }
+
+    private Object[] resolveArgs(HttpServletRequest req, Method method) {
+        Parameter[] parameters = method.getParameters();
+        Object[] args = new Object[parameters.length];
+
+        for (int i = 0; i < parameters.length; i++) {
+            Parameter parameter = parameters[i];
+            Param param = parameter.getAnnotation(Param.class);
+            String val;
+            if (param != null) {
+                val = req.getParameter(param.value());
+            } else {
+                val = req.getParameter(parameter.getName());
+            }
+
+            Class<?> paramType = parameter.getType();
+            if (String.class.isAssignableFrom(paramType)) {
+                args[i] = val;
+            } else if (Integer.class.isAssignableFrom(paramType)) {
+                args[i] = Integer.parseInt(val);
+            } else {
+                args[i] = null;
+            }
+        }
+
+        return args;
     }
 
     private WebHandler findHandler(HttpServletRequest req) {
