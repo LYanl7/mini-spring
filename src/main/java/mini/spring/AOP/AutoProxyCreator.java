@@ -20,7 +20,8 @@ public class AutoProxyCreator implements BeanPostProcessor {
 
     @Override
     public Object afterInitialization(Object bean, String beanName) {
-        for (Method declaredMethod : bean.getClass().getDeclaredMethods()) {
+        Object originalBean = DynamicProxyFactory.getOriginalClass(bean);
+        for (Method declaredMethod : originalBean.getClass().getDeclaredMethods()) {
             for (Advisor advisor : advisors) {
                 PointcutExpression pointcutExpression = advisor.getPointcutExpression();
                 boolean hit = !bean.getClass().isAnnotationPresent(Aspect.class) &&

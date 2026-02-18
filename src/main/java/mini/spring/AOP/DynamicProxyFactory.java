@@ -2,6 +2,7 @@ package mini.spring.AOP;
 
 import net.bytebuddy.ByteBuddy;
 import net.bytebuddy.dynamic.loading.ClassLoadingStrategy;
+import net.bytebuddy.implementation.FixedValue;
 import net.bytebuddy.implementation.MethodDelegation;
 import net.bytebuddy.implementation.bind.annotation.AllArguments;
 import net.bytebuddy.implementation.bind.annotation.Origin;
@@ -11,14 +12,18 @@ import net.bytebuddy.implementation.bind.annotation.This;
 import net.bytebuddy.matcher.ElementMatchers;
 
 import java.lang.reflect.Field;
+import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.lang.reflect.Modifier;
 import java.lang.reflect.Proxy;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 public final class DynamicProxyFactory {
 
@@ -40,8 +45,36 @@ public final class DynamicProxyFactory {
     }
 
     private static final Object[] NO_ARGS = new Object[0];
+    private static final ConcurrentMap<Class<?>, Class<?>> JDK_ORIGINAL_CLASS_TOKEN_CACHE = new ConcurrentHashMap<>();
+    private static final String JDK_ORIGINAL_CLASS_TOKEN_SUFFIX = "$JdkOriginalClass$";
+    private static final String JDK_ORIGINAL_CLASS_TOKEN_METHOD = "originalClass";
 
     private DynamicProxyFactory() {
+    }
+
+    public static Class<?> getOriginalClass(Object proxy) {
+        Objects.requireNonNull(proxy, "proxy must not be null");
+        return getOriginalClass(proxy.getClass());
+    }
+
+    public static Class<?> getOriginalClass(Class<?> proxyClass) {
+        Objects.requireNonNull(proxyClass, "proxyClass must not be null");
+
+        Class<?> current = proxyClass;
+        while (isByteBuddySubclassProxy(current)) {
+            Class<?> superClass = current.getSuperclass();
+            if (superClass == null || superClass == Object.class) {
+                break;
+            }
+            current = superClass;
+        }
+
+        if (!Proxy.isProxyClass(current)) {
+            return current;
+        }
+
+        Class<?> original = resolveOriginalClassFromJdkProxy(current);
+        return (original != null ? original : current);
     }
 
     public static <T> T createProxy(T target, MethodInterceptor interceptor) {
@@ -64,22 +97,23 @@ public final class DynamicProxyFactory {
         Objects.requireNonNull(interceptor, "interceptor must not be null");
 
         Class<?> targetClass = target.getClass();
-        Class<?>[] interfaces = getAllInterfaces(targetClass);
-        if (interfaces.length == 0) {
+        Class<?> originalClass = getOriginalClass(targetClass);
+        Set<Class<?>> interfaces = new LinkedHashSet<>();
+        Class<?>[] targetInterfaces = getAllInterfaces(targetClass);
+        if (targetInterfaces.length == 0) {
             throw new IllegalArgumentException("JDK proxy requires at least one interface: " + targetClass.getName());
         }
 
+        for (Class<?> ifc : targetInterfaces) {
+            interfaces.add(ifc);
+        }
+        maybeAddJdkOriginalClassTokenInterface(interfaces, originalClass);
+        Class<?>[] interfaceArray = interfaces.toArray(Class<?>[]::new);
+
         Object proxy = Proxy.newProxyInstance(
                 targetClass.getClassLoader(),
-                interfaces,
-                (p, method, args) -> {
-                    Object[] arguments = (args != null ? args : NO_ARGS);
-                    if (method.getDeclaringClass() == Object.class) {
-                        return invokeReflectively(target, method, arguments);
-                    }
-                    Method targetMethod = resolveMethod(targetClass, method);
-                    return interceptor.invoke(new ReflectiveMethodInvocation(p, target, targetMethod, arguments));
-                }
+                interfaceArray,
+                new JdkProxyInvocationHandler(target, targetClass, interceptor)
         );
         return (T) proxy;
     }
@@ -147,6 +181,76 @@ public final class DynamicProxyFactory {
                 collectInterfaces(parent, interfaces);
             }
         }
+    }
+
+    private static boolean isByteBuddySubclassProxy(Class<?> candidate) {
+        return candidate != null && candidate.getName().contains("$ByteBuddy$");
+    }
+
+    private static Class<?> resolveOriginalClassFromJdkProxy(Class<?> proxyClass) {
+        for (Class<?> ifc : proxyClass.getInterfaces()) {
+            if (!isJdkOriginalClassTokenInterface(ifc)) {
+                continue;
+            }
+            try {
+                Method method = ifc.getMethod(JDK_ORIGINAL_CLASS_TOKEN_METHOD);
+                Object value = method.invoke(null);
+                return (Class<?>) value;
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("Failed to resolve original class from JDK proxy: " + proxyClass.getName(), e);
+            }
+        }
+        return null;
+    }
+
+    private static boolean isJdkOriginalClassTokenInterface(Class<?> candidate) {
+        return candidate != null
+                && candidate.isInterface()
+                && candidate.getName().startsWith(DynamicProxyFactory.class.getName() + JDK_ORIGINAL_CLASS_TOKEN_SUFFIX);
+    }
+
+    private static void maybeAddJdkOriginalClassTokenInterface(Set<Class<?>> interfaces, Class<?> originalClass) {
+        ClassLoader loader = originalClass.getClassLoader();
+        if (loader == null) {
+            return;
+        }
+
+        try {
+            interfaces.add(getOrCreateJdkOriginalClassTokenInterface(originalClass, loader));
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    private static Class<?> getOrCreateJdkOriginalClassTokenInterface(Class<?> originalClass, ClassLoader loader) {
+        return JDK_ORIGINAL_CLASS_TOKEN_CACHE.computeIfAbsent(originalClass, key -> {
+            String tokenName = DynamicProxyFactory.class.getName()
+                    + JDK_ORIGINAL_CLASS_TOKEN_SUFFIX
+                    + toSafeTypeSuffix(key.getName());
+
+            try {
+                return Class.forName(tokenName, false, loader);
+            } catch (ClassNotFoundException ignored) {
+            }
+
+            return new ByteBuddy()
+                    .makeInterface()
+                    .name(tokenName)
+                    .defineMethod(JDK_ORIGINAL_CLASS_TOKEN_METHOD, Class.class, Modifier.PUBLIC | Modifier.STATIC)
+                    .intercept(FixedValue.value(key))
+                    .make()
+                    .load(loader, ClassLoadingStrategy.Default.INJECTION)
+                    .getLoaded();
+        });
+    }
+
+    private static String toSafeTypeSuffix(String name) {
+        byte[] bytes = name.getBytes(StandardCharsets.UTF_8);
+        StringBuilder builder = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) {
+            builder.append(Character.forDigit((b >>> 4) & 0xF, 16));
+            builder.append(Character.forDigit(b & 0xF, 16));
+        }
+        return builder.toString();
     }
 
     private static Method resolveMethod(Class<?> targetClass, Method method) {
@@ -246,6 +350,28 @@ public final class DynamicProxyFactory {
         ) throws Throwable {
             Object[] arguments = (args != null ? args : NO_ARGS);
             return interceptor.invoke(new SuperCallMethodInvocation(proxy, method, arguments, superCall));
+        }
+    }
+
+    private static final class JdkProxyInvocationHandler implements InvocationHandler {
+        private final Object target;
+        private final Class<?> targetClass;
+        private final MethodInterceptor interceptor;
+
+        private JdkProxyInvocationHandler(Object target, Class<?> targetClass, MethodInterceptor interceptor) {
+            this.target = target;
+            this.targetClass = targetClass;
+            this.interceptor = interceptor;
+        }
+
+        @Override
+        public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
+            Object[] arguments = (args != null ? args : NO_ARGS);
+            if (method.getDeclaringClass() == Object.class) {
+                return invokeReflectively(target, method, arguments);
+            }
+            Method targetMethod = resolveMethod(targetClass, method);
+            return interceptor.invoke(new ReflectiveMethodInvocation(proxy, target, targetMethod, arguments));
         }
     }
 
